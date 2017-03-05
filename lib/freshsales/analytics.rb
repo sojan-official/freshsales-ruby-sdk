@@ -4,6 +4,7 @@ module FreshsalesAnalytics
 
   @config = {
               app_token: nil,
+              api_key: nil,
               url: nil
             }
 
@@ -54,7 +55,49 @@ module FreshsalesAnalytics
       end
     end
 
+    def configure_with_hash(config_values = {})
+      if config_values.present?
+        @config[:url] = config_values[:url]
+        @config[:api_key] = config_values[:api_key]
+        @config[:app_token] = config_values[:app_token]
+      end
+    end
+
+    def get_leads_filter_id_by_name filter_name
+      get_data_from_api("leads/filters")["filters"].each do |filter|
+        return filter["id"] if filter["name"].downcase == filter_name.downcase
+      end
+    end
+
+    def get_leads_from_filter filter_id, parameters={}
+      url = "leads/view/#{filter_id}"
+      if(parameters[:sort].present? && parameters[:sort_type].present?)
+        url = url + "?sort=#{parameters[:sort]}&sort_type=#{parameters[:sort_type]}"
+      end
+      return get_data_from_api(url)["leads"]
+    end
+
     private
+
+    def get_data_from_api(endpoint)
+     url, api_key = get_url_and_api_key
+     begin
+      response = HTTParty.get(url + '/api/' + endpoint,
+                              body: "",
+                              headers:  {
+                                'Content-Type' => 'application/json',
+                                'Accept' => 'application/json',
+                                'Authorization'=> "Token token=#{api_key}" }) 
+      if response.code != 200
+        raise Exceptions.new('Data not sent'),
+          'Data is not sent to Freshsales because of the error code ' + response.code.to_s
+      else
+        return JSON.parse(response.body)
+      end
+    rescue Timeout::Error
+      p 'Could not fetch to #{url}/#{endpoint}: timeout'
+    end
+    end
 
     def post_data(action, data)
       url, app_token = get_url_and_app_token
@@ -83,6 +126,17 @@ module FreshsalesAnalytics
         app_token = @config[:app_token]
       end
       [url, app_token]
+    end
+
+    def get_url_and_api_key
+      url = @config[:url]
+      api_key = @config[:api_key]
+      if url.nil? || api_key.nil?
+        configure_with_yaml(File.join(Rails.root, 'config', 'fs_analytics_config.yml'))
+        url = @config[:url]
+        app_token = @config[:api_key]
+      end
+      [url, api_key]
     end
 
     def configure_with_yaml(path_to_yaml_file)
